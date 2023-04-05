@@ -13,6 +13,10 @@ typedef struct {
     SensorData data;
     bool is_valid;
 } TempData;
+typedef struct {
+    float acc_x, acc_y, acc_z;
+    float gyro_x, gyro_y, gyro_z;
+} ReadyPack;
 
 void processData(SensorData sensor_data);
 
@@ -31,11 +35,7 @@ unsigned int gyro_data_loss_count = 0;
 
 
 int data_ready = 0;
-typedef struct {
-    float acc_x, acc_y, acc_z;
-    float gyro_x, gyro_y, gyro_z;
-} ReadyPack;
-ReadyPack ready_pack;
+int need_reset = 0;
 
 TempData acc_temp = { .is_valid = false };
 TempData gyro_temp = { .is_valid = false };
@@ -82,7 +82,7 @@ void ready_queue_pop(SensorData* ready_data, size_t* ready_index) {
     (*ready_index)--;
 }
 
-void ready_queue_push(SensorData* ready_data, size_t* ready_index) {
+void ready_queue_push(SensorData* ready_data, size_t* ready_index, SensorData new_data) {
     if (*ready_index < READY_BUFFER_SIZE) {
         ready_data[*ready_index] = new_data;
         (*ready_index)++;
@@ -94,7 +94,7 @@ void ready_queue_push(SensorData* ready_data, size_t* ready_index) {
 
 void clear_buffers() {
     acc_temp.is_valid = false;
-    acc_temp.is_valid = false;
+    gyro_temp.is_valid = false;
     acc_ready_index = 0;
     gyro_ready_index = 0;
 }
@@ -134,9 +134,9 @@ void processData(SensorData sensor_data) {
             // 线性插值生成新的数据点
             while (time_diff >= TARGET_INTERVAL + TOLERANCE) {
 
-                if (sensor_type == ACC) {
+                if (strcmp(sensor_data.sensor_type, "ACC") == 0) {
                     acc_data_loss_count++;
-                } else if (sensor_type == GYRO) {
+                } else if (strcmp(sensor_data.sensor_type, "GYRO") == 0) {
                     gyro_data_loss_count++;
                 }
 
@@ -150,7 +150,7 @@ void processData(SensorData sensor_data) {
                 };
 
                 // 将新生成的数据点存入 ready 缓存数组
-                ready_queue_push(ready_data, ready_index);
+                ready_queue_push(ready_data, ready_index, new_data);
 
                 // 更新临时缓存数据和时间差
                 temp_data->data = new_data;
@@ -159,13 +159,13 @@ void processData(SensorData sensor_data) {
             // 检查剩余的时间差是否在允许范围内
             if (time_diff >= TARGET_INTERVAL - TOLERANCE && time_diff <= TARGET_INTERVAL + TOLERANCE) {
                 // 当时间差在目标间隔的容差范围内时，将此数据点存入 ready 缓存数组
-                ready_queue_push(ready_data, ready_index);
+                ready_queue_push(ready_data, ready_index, sensor_data);
             }
             // 处理完所有插值数据后，将当前数据点存入临时缓存
             temp_data->data = sensor_data;
         } else {
             // 当时间差在目标间隔的容差范围内时，将此数据点存入 ready 缓存数组
-            ready_queue_push(ready_data, ready_index);
+            ready_queue_push(ready_data, ready_index, sensor_data);
             // 更新临时缓存数据
             temp_data->data = sensor_data;
         }
@@ -173,7 +173,7 @@ void processData(SensorData sensor_data) {
         // 如果临时缓存为空，且当前数据点的时间戳与目标间隔相差较小，则直接将数据点存入 ready 缓存数组
         int timestamp_mod = sensor_data.timestamp % TARGET_INTERVAL;
         if (timestamp_mod < TARGET_INTERVAL / 2 + TOLERANCE && timestamp_mod > TARGET_INTERVAL / 2 - TOLERANCE) {
-            ready_queue_push(ready_data, ready_index);
+            ready_queue_push(ready_data, ready_index, sensor_data);
         }
         // 将当前数据点存入临时缓存，并设置 is_valid 为 true
         temp_data->data = sensor_data;
